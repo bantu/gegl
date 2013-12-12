@@ -129,8 +129,6 @@ process (GeglOperation       *op,
   return TRUE;
 }
 
-#include "opencl/value-invert.cl.h"
-
 static void
 gegl_chant_class_init (GeglChantClass *klass)
 {
@@ -147,7 +145,6 @@ gegl_chant_class_init (GeglChantClass *klass)
     "name"       , "gegl:apply-canvas",
     "categories" , "artistic",
     "description", _("Textures the image as if it were an artist's canvas."),
-    "cl-source"  , value_invert_cl_source,
     NULL);
 }
 
