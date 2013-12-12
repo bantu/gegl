@@ -145,10 +145,8 @@ gegl_chant_class_init (GeglChantClass *klass)
 
   gegl_operation_class_set_keys (operation_class,
     "name"       , "gegl:apply-canvas",
-    "categories" , "color",
-    "description",
-        _("Inverts just the value component, the result is the corresponding "
-          "`inverted' image."),
+    "categories" , "artistic",
+    "description", _("Textures the image as if it were an artist's canvas."),
     "cl-source"  , value_invert_cl_source,
     NULL);
 }
