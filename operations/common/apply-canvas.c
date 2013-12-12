@@ -48,7 +48,7 @@
 #else
 
 #define GEGL_CHANT_TYPE_POINT_FILTER
-#define GEGL_CHANT_C_FILE       "value-invert.c"
+#define GEGL_CHANT_C_FILE "apply-canvas.c"
 
 #include "gegl-chant.h"
 
@@ -144,7 +144,7 @@ gegl_chant_class_init (GeglChantClass *klass)
   operation_class->prepare = prepare;
 
   gegl_operation_class_set_keys (operation_class,
-    "name"       , "gegl:value-invert",
+    "name"       , "gegl:apply-canvas",
     "categories" , "color",
     "description",
         _("Inverts just the value component, the result is the corresponding "
