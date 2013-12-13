@@ -1069,8 +1069,8 @@ static void
 prepare (GeglOperation *operation)
 {
   // TODO: Greyscale?
-  gegl_operation_set_format (operation, "input", babl_format ("RGBA u8"));
-  gegl_operation_set_format (operation, "output", babl_format ("RGBA u8"));
+  gegl_operation_set_format (operation, "input", babl_format ("R'G'B'A u8"));
+  gegl_operation_set_format (operation, "output", babl_format ("R'G'B'A u8"));
 }
 
 static gboolean
