@@ -1068,9 +1068,11 @@ static const gchar sdata[] =
 static void
 prepare (GeglOperation *operation)
 {
+  const Babl *format = babl_format ("R'G'B'A u8");
+
   // TODO: Greyscale?
-  gegl_operation_set_format (operation, "input", babl_format ("R'G'B'A u8"));
-  gegl_operation_set_format (operation, "output", babl_format ("R'G'B'A u8"));
+  gegl_operation_set_format (operation, "input", format);
+  gegl_operation_set_format (operation, "output", format);
 }
 
 static gboolean
