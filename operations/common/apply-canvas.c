@@ -1080,13 +1080,13 @@ prepare (GeglOperation *operation)
     {
       new_format = babl_format ("Y'A u8");
     }
-  else if (components == 3)
+  else if (babl_format_has_alpha (format))
     {
-      new_format = babl_format ("R'G'B' u8");
+      new_format = babl_format ("R'G'B'A u8");
     }
   else
     {
-      new_format = babl_format ("R'G'B'A u8");
+      new_format = babl_format ("R'G'B' u8");
     }
 
   gegl_operation_set_format (operation, "input", new_format);
