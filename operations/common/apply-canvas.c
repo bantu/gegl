@@ -1068,15 +1068,33 @@ static const gchar sdata[] =
 static void
 prepare (GeglOperation *operation)
 {
-  const Babl *format = babl_format ("R'G'B'A u8");
+  const Babl *new_format;
+  const Babl *format = gegl_operation_get_source_format (operation, "input");
+  gint components = babl_format_get_n_components (format);
 
-  // TODO: Greyscale?
-  gegl_operation_set_format (operation, "input", format);
-  gegl_operation_set_format (operation, "output", format);
+  if (components == 1)
+    {
+      new_format = babl_format ("Y' u8");
+    }
+  else if (components == 2 && babl_format_has_alpha (format))
+    {
+      new_format = babl_format ("Y'A u8");
+    }
+  else if (components == 3)
+    {
+      new_format = babl_format ("R'G'B' u8");
+    }
+  else
+    {
+      new_format = babl_format ("R'G'B'A u8");
+    }
+
+  gegl_operation_set_format (operation, "input", new_format);
+  gegl_operation_set_format (operation, "output", new_format);
 }
 
 static gboolean
-process (GeglOperation       *op,
+process (GeglOperation       *operation,
          void                *in_buf,
          void                *out_buf,
          glong                samples,
@@ -1100,6 +1118,10 @@ process (GeglOperation       *op,
   guchar  rrow; // Absolute row number in whole image (modulo 128)
   guchar  rcol; // Absolute column number in whole image (modulo 128)
   gchar   val;  // Value being added to each color byte
+
+  const Babl *format = gegl_operation_get_format (operation, "input");
+  gboolean    has_alpha  = babl_format_has_alpha (format);
+  gint        components = babl_format_get_n_components (format) - has_alpha;
 
   switch (direction)
     {
@@ -1141,7 +1163,7 @@ process (GeglOperation       *op,
         {
           rcol = (guchar) ((roi->x + col) % 128);
           val = mult * sdata[rcol * xm + rrow * ym + offs];
-          for (i = 0; i < 3; ++i)
+          for (i = 0; i < components; ++i)
             {
               byte = *src++;
               byte += val;
@@ -1156,7 +1178,10 @@ process (GeglOperation       *op,
               *dest++ = (guchar) byte;
             }
 
-          *dest++ = *src++;
+          if (has_alpha)
+            {
+              *dest++ = *src++;
+            }
         }
     }
   return TRUE;
