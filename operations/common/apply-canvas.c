@@ -25,10 +25,25 @@
 #include "config.h"
 #include <glib/gi18n-lib.h>
 
-
 #ifdef GEGL_CHANT_PROPERTIES
 
-   /* no properties */
+gegl_chant_register_enum (gegl_apply_canvas_direction)
+  enum_value (GEGL_APPLY_CANVAS_DIRECTION_TOP_RIGHT,    "Top-right")
+  enum_value (GEGL_APPLY_CANVAS_DIRECTION_TOP_LEFT,     "Top-left")
+  enum_value (GEGL_APPLY_CANVAS_DIRECTION_BOTTOM_LEFT,  "Bottom-left")
+  enum_value (GEGL_APPLY_CANVAS_DIRECTION_BOTTOM_RIGHT, "Bottom-right")
+gegl_chant_register_enum_end (GeglApplyCanvasDirection)
+
+gegl_chant_enum (direction, _("Direction"),
+                 GeglApplyCanvasDirection,
+                 gegl_apply_canvas_direction,
+                 GEGL_APPLY_CANVAS_DIRECTION_TOP_RIGHT,
+                 _("Position of the light source which lightens the canvas: "
+                   "Top-right, Top-left, Bottom-left or Bottom-right"))
+
+gegl_chant_int  (depth, _("Depth"), 1, 50, 4,
+                 _("Apparent depth of the rendered canvas effect; "
+                   "from 1 (very flat) to 50 (very deep)"))
 
 #else
 
@@ -1101,16 +1116,14 @@ process (GeglOperation       *operation,
          const GeglRectangle *roi,
          gint                 level)
 {
-  // TODO: Parameters
-  gint depth = 4;
-  gint direction = 4;
+  GeglChantO *opt = GEGL_CHANT_PROPERTIES (operation);
 
   guchar *src  = in_buf;
   guchar *dest = out_buf;
 
   guchar  i;
   gint    xm, ym, offs;
-  gfloat  mult = (gfloat) depth * 0.25;
+  gfloat  mult = (gfloat) opt->depth * 0.25;
 
   gint    row;  // Row number in rectangle
   gint    col;  // Column number in rectangle
@@ -1123,27 +1136,27 @@ process (GeglOperation       *operation,
   gboolean    has_alpha  = babl_format_has_alpha (format);
   gint        components = babl_format_get_n_components (format) - has_alpha;
 
-  switch (direction)
+  switch (opt->direction)
     {
-      case 0:
+      case GEGL_APPLY_CANVAS_DIRECTION_TOP_RIGHT:
         xm = 1;
         ym = 128;
         offs = 0;
         break;
 
-      case 1:
+      case GEGL_APPLY_CANVAS_DIRECTION_TOP_LEFT:
         xm = -1;
         ym = 128;
         offs = 127;
         break;
 
-      case 2:
+      case GEGL_APPLY_CANVAS_DIRECTION_BOTTOM_LEFT:
         xm = 128;
         ym = 1;
         offs = 0;
         break;
 
-      case 3:
+      case GEGL_APPLY_CANVAS_DIRECTION_BOTTOM_RIGHT:
         xm = 128;
         ym = -1;
         offs = 128;
