@@ -1138,6 +1138,7 @@ process (GeglOperation       *operation,
 
   switch (opt->direction)
     {
+      default:
       case GEGL_APPLY_CANVAS_DIRECTION_TOP_RIGHT:
         xm = 1;
         ym = 128;
@@ -1160,12 +1161,6 @@ process (GeglOperation       *operation,
         xm = 128;
         ym = -1;
         offs = 128;
-        break;
-
-      default:
-        xm = 1;
-        ym = 128;
-        offs = 0;
         break;
     }
 
