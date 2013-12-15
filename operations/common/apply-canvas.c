@@ -1085,7 +1085,12 @@ prepare (GeglOperation *operation)
 {
   const Babl *new_format;
   const Babl *format = gegl_operation_get_source_format (operation, "input");
-  gint components = babl_format_get_n_components (format);
+
+  gint components = 0;
+  if (format != NULL)
+    {
+      components = babl_format_get_n_components (format);
+    }
 
   if (components == 1)
     {
@@ -1095,7 +1100,7 @@ prepare (GeglOperation *operation)
     {
       new_format = babl_format ("Y'A u8");
     }
-  else if (babl_format_has_alpha (format))
+  else if (components == 0 || babl_format_has_alpha (format))
     {
       new_format = babl_format ("R'G'B'A u8");
     }
