@@ -27,17 +27,17 @@
 
 #ifdef GEGL_CHANT_PROPERTIES
 
-gegl_chant_register_enum (gegl_apply_canvas_direction)
-  enum_value (GEGL_APPLY_CANVAS_DIRECTION_TOP_RIGHT,    "Top-right")
-  enum_value (GEGL_APPLY_CANVAS_DIRECTION_TOP_LEFT,     "Top-left")
-  enum_value (GEGL_APPLY_CANVAS_DIRECTION_BOTTOM_LEFT,  "Bottom-left")
-  enum_value (GEGL_APPLY_CANVAS_DIRECTION_BOTTOM_RIGHT, "Bottom-right")
-gegl_chant_register_enum_end (GeglApplyCanvasDirection)
+gegl_chant_register_enum (gegl_texturize_canvas_direction)
+  enum_value (GEGL_TEXTURIZE_CANVAS_DIRECTION_TOP_RIGHT,    "Top-right")
+  enum_value (GEGL_TEXTURIZE_CANVAS_DIRECTION_TOP_LEFT,     "Top-left")
+  enum_value (GEGL_TEXTURIZE_CANVAS_DIRECTION_BOTTOM_LEFT,  "Bottom-left")
+  enum_value (GEGL_TEXTURIZE_CANVAS_DIRECTION_BOTTOM_RIGHT, "Bottom-right")
+gegl_chant_register_enum_end (GeglTexturizeCanvasDirection)
 
 gegl_chant_enum (direction, _("Direction"),
-                 GeglApplyCanvasDirection,
-                 gegl_apply_canvas_direction,
-                 GEGL_APPLY_CANVAS_DIRECTION_TOP_RIGHT,
+                 GeglTexturizeCanvasDirection,
+                 gegl_texturize_canvas_direction,
+                 GEGL_TEXTURIZE_CANVAS_DIRECTION_TOP_RIGHT,
                  _("Position of the light source which lightens the canvas: "
                    "Top-right, Top-left, Bottom-left or Bottom-right"))
 
@@ -48,7 +48,7 @@ gegl_chant_int  (depth, _("Depth"), 1, 50, 4,
 #else
 
 #define GEGL_CHANT_TYPE_POINT_FILTER
-#define GEGL_CHANT_C_FILE "apply-canvas.c"
+#define GEGL_CHANT_C_FILE "texturize-canvas.c"
 
 #include "gegl-chant.h"
 
@@ -4216,25 +4216,25 @@ process (GeglOperation       *operation,
   switch (opt->direction)
     {
       default:
-      case GEGL_APPLY_CANVAS_DIRECTION_TOP_RIGHT:
+      case GEGL_TEXTURIZE_CANVAS_DIRECTION_TOP_RIGHT:
         xm = 1;
         ym = 128;
         offs = 0;
         break;
 
-      case GEGL_APPLY_CANVAS_DIRECTION_TOP_LEFT:
+      case GEGL_TEXTURIZE_CANVAS_DIRECTION_TOP_LEFT:
         xm = -1;
         ym = 128;
         offs = 127;
         break;
 
-      case GEGL_APPLY_CANVAS_DIRECTION_BOTTOM_LEFT:
+      case GEGL_TEXTURIZE_CANVAS_DIRECTION_BOTTOM_LEFT:
         xm = 128;
         ym = 1;
         offs = 0;
         break;
 
-      case GEGL_APPLY_CANVAS_DIRECTION_BOTTOM_RIGHT:
+      case GEGL_TEXTURIZE_CANVAS_DIRECTION_BOTTOM_RIGHT:
         xm = 128;
         ym = -1;
         offs = 128;
@@ -4284,7 +4284,7 @@ gegl_chant_class_init (GeglChantClass *klass)
   operation_class->prepare = prepare;
 
   gegl_operation_class_set_keys (operation_class,
-    "name"       , "gegl:apply-canvas",
+    "name"       , "gegl:texturize-canvas",
     "categories" , "artistic",
     "description", _("Textures the image as if it were an artist's canvas."),
     NULL);

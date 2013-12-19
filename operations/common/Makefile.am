@@ -12,7 +12,6 @@ opdir = $(ext_dir)
 op_LTLIBRARIES = \
 	alien-map.la \
 	antialias.la \
-	apply-canvas.la \
 	bilateral-filter-fast.la \
 	bilateral-filter.la \
 	box-blur.la \
@@ -105,6 +104,7 @@ op_LTLIBRARIES = \
 	svg-luminancetoalpha.la \
 	svg-matrix.la \
 	svg-saturate.la \
+	texturize-canvas.la \
 	threshold.la \
 	tile-seamless.la \
 	tile.la \
