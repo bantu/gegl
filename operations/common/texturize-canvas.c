@@ -17,9 +17,6 @@
  *
  * Based on the GIMP apply-canvas filter
  * Copyright (C) 1997 Karl-Johan Andersson (t96kja@student.tdb.uu.se)
- *
- * Some code for the dialog was taken from Motion Blur plug-in for
- * GIMP 0.99 by Daniel Skarda (0rfelyus@atrey.karlin.mff.cuni.cz)
  */
 
 #include "config.h"
