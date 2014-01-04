@@ -4234,10 +4234,12 @@ process (GeglOperation       *operation,
         break;
     }
 
+  #pragma omp parallel for schedule(static) collapse(2)
   for (row = 0; row < roi->height; ++row)
     {
       for (col = 0; col < roi->width; ++col)
         {
+          gint j = (row * roi->width + col) * components;
           gint i;
           for (i = 0; i < components; ++i)
             {
@@ -4248,13 +4250,13 @@ process (GeglOperation       *operation,
               gint   index = ((roi->x + col) & 127) * xm +
                              ((roi->y + row) & 127) * ym +
                              offs;
-              gfloat color = mult * sdata [index] + *src++;
-              *dest++ = CLAMP (color, 0.0, 1.0);
+              gfloat color = mult * sdata [index] + src [j + i];
+              dest [j + i] = CLAMP (color, 0.0, 1.0);
             }
 
           if (has_alpha)
             {
-              *dest++ = *src++;
+              dest [j + i] = src [j + i];
             }
         }
     }
