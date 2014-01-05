@@ -4199,9 +4199,6 @@ process (GeglOperation       *operation,
   gint    xm, ym, offs;
   gfloat  mult = (gfloat) opt->depth * 0.25;
 
-  gint   row;   /* Row number in rectangle */
-  gint   col;   /* Column number in rectangle */
-
   const Babl *format = gegl_operation_get_format (operation, "input");
   gboolean    has_alpha  = babl_format_has_alpha (format);
   gint        components = babl_format_get_n_components (format) - has_alpha;
@@ -4234,12 +4231,14 @@ process (GeglOperation       *operation,
         break;
     }
 
-  for (row = 0; row < roi->height; ++row)
+  #pragma omp parallel for
+  for (gint row = 0; row < roi->height; ++row)
     {
-      for (col = 0; col < roi->width; ++col)
+      gfloat *in = src + row * roi->width * components;
+      gfloat *out = dest + row * roi->width * components;
+      for (gint col = 0; col < roi->width; ++col)
         {
-          gint i;
-          for (i = 0; i < components; ++i)
+          for (gint i = 0; i < components; ++i)
             {
               /*
                * Assuming twos-complement representation, it holds that n & 127
@@ -4248,13 +4247,13 @@ process (GeglOperation       *operation,
               gint   index = ((roi->x + col) & 127) * xm +
                              ((roi->y + row) & 127) * ym +
                              offs;
-              gfloat color = mult * sdata [index] + *src++;
-              *dest++ = CLAMP (color, 0.0, 1.0);
+              gfloat color = mult * sdata [index] + *in++;
+              *out++ = CLAMP (color, 0.0, 1.0);
             }
 
           if (has_alpha)
             {
-              *dest++ = *src++;
+              *out++ = *in++;
             }
         }
     }
