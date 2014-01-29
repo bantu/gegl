@@ -4261,6 +4261,111 @@ process (GeglOperation       *operation,
   return TRUE;
 }
 
+#include "opencl/gegl-cl.h"
+#include "opencl/texturize-canvas.cl.h"
+
+static GeglClRunData *cl_data = NULL;
+
+static gboolean
+cl_process (GeglOperation       *operation,
+            cl_mem              in,
+            cl_mem              out,
+            size_t              global_worksize,
+            const GeglRectangle *roi,
+            gint                level)
+{
+  GeglChantO *opt = GEGL_CHANT_PROPERTIES (operation);
+
+  cl_int   xm, ym, offs;
+  cl_float mult = (cl_float) opt->depth * 0.25;
+
+  const Babl *format = gegl_operation_get_format (operation, "input");
+  cl_int     has_alpha = babl_format_has_alpha (format);
+  cl_int     components = babl_format_get_n_components (format) - has_alpha;
+  cl_int     cl_err = 0;
+  cl_mem     texture;
+
+  switch (opt->direction)
+    {
+      default:
+      case GEGL_TEXTURIZE_CANVAS_DIRECTION_TOP_RIGHT:
+        xm = 1;
+        ym = 128;
+        offs = 0;
+        break;
+
+      case GEGL_TEXTURIZE_CANVAS_DIRECTION_TOP_LEFT:
+        xm = -1;
+        ym = 128;
+        offs = 127;
+        break;
+
+      case GEGL_TEXTURIZE_CANVAS_DIRECTION_BOTTOM_LEFT:
+        xm = 128;
+        ym = 1;
+        offs = 0;
+        break;
+
+      case GEGL_TEXTURIZE_CANVAS_DIRECTION_BOTTOM_RIGHT:
+        xm = 128;
+        ym = -1;
+        offs = 127;
+        break;
+    }
+
+  if (!cl_data)
+    {
+      const char *kernel_name[] = {"cl_texturize_canvas",
+                                   NULL};
+      cl_data = gegl_cl_compile_and_build (texturize_canvas_cl_source,
+                                           kernel_name);
+    }
+
+  if (!cl_data)
+    return TRUE;
+
+  // Make sdata array available to OpenCL.
+  texture = gegl_clCreateBuffer(gegl_cl_get_context(),
+                                CL_MEM_COPY_HOST_PTR | CL_MEM_READ_ONLY,
+                                sizeof(sdata), (void*) sdata, &cl_err);
+  CL_CHECK;
+
+  gegl_cl_set_kernel_args (cl_data->kernel[0],
+                           sizeof(cl_mem),    (void*) &in,
+                           sizeof(cl_mem),    (void*) &out,
+                           sizeof(cl_mem),    (void*) &texture,
+                           sizeof(cl_float),  (void*) &mult,
+                           sizeof(cl_int),    (void*) &xm,
+                           sizeof(cl_int),    (void*) &ym,
+                           sizeof(cl_int),    (void*) &offs,
+                           sizeof(cl_int),    (void*) &components,
+                           sizeof(cl_int),    (void*) &has_alpha,
+                           sizeof(cl_int),    (void*) &(roi->x),
+                           sizeof(cl_int),    (void*) &(roi->y),
+                           sizeof(cl_int),    (void*) &(roi->width),
+                           NULL);
+  CL_CHECK;
+
+  global_worksize *= (config.components + config.has_alpha);
+
+  cl_err = gegl_clEnqueueNDRangeKernel (gegl_cl_get_command_queue (),
+                                        cl_data->kernel[0], 1,
+                                        NULL, &global_worksize, NULL,
+                                        0, NULL, NULL);
+  CL_CHECK;
+
+  cl_err = gegl_clFinish(gegl_cl_get_command_queue());
+  CL_CHECK;
+
+  cl_err = gegl_clReleaseMemObject(texture);
+  CL_CHECK_ONLY(cl_err);
+
+  return FALSE;
+
+error:
+  return TRUE;
+}
+
 static void
 gegl_chant_class_init (GeglChantClass *klass)
 {
@@ -4270,8 +4375,10 @@ gegl_chant_class_init (GeglChantClass *klass)
   operation_class    = GEGL_OPERATION_CLASS (klass);
   point_filter_class = GEGL_OPERATION_POINT_FILTER_CLASS (klass);
 
-  point_filter_class->process = process;
-  operation_class->prepare = prepare;
+  operation_class->prepare        = prepare;
+  operation_class->opencl_support = TRUE;
+  point_filter_class->process     = process;
+  point_filter_class->cl_process  = cl_process;
 
   gegl_operation_class_set_keys (operation_class,
     "name"       , "gegl:texturize-canvas",
