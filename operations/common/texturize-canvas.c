@@ -49,6 +49,16 @@ gegl_chant_int  (depth, _("Depth"), 1, 50, 4,
 
 #include "gegl-chant.h"
 
+/* Contains internal parameters derived from user input. */
+typedef struct {
+  gint xm;   /* Derived from canvas direction */
+  gint ym;   /* Derived from canvas direction */
+  gint offs; /* Derived from canvas direction */
+  gint mult; /* Derived from canvas depth */
+  gint components;     /* Number of non-alpha colors */
+  gboolean has_alpha;  /* Whether there is an alpha channel or not */
+} TexturizeCanvasParameters;
+
 /* This array contains 16384 floats interpreted as a 128x128 texture */
 static const gfloat sdata [128 * 128] =
 {
@@ -4183,6 +4193,45 @@ prepare (GeglOperation *operation)
   gegl_operation_set_format (operation, "output", new_format);
 }
 
+static void
+derive_parameters (GeglOperation *operation, TexturizeCanvasParameters *result)
+{
+  GeglChantO *opt = GEGL_CHANT_PROPERTIES (operation);
+  const Babl *format = gegl_operation_get_format (operation, "input");
+
+  result->has_alpha  = babl_format_has_alpha (format);
+  result->components = babl_format_get_n_components (format) - result->has_alpha;
+  result->mult = (gfloat) opt->depth * 0.25;
+
+  switch (opt->direction)
+    {
+      default:
+      case GEGL_TEXTURIZE_CANVAS_DIRECTION_TOP_RIGHT:
+        result->xm = 1;
+        result->ym = 128;
+        result->offs = 0;
+        break;
+
+      case GEGL_TEXTURIZE_CANVAS_DIRECTION_TOP_LEFT:
+        result->xm = -1;
+        result->ym = 128;
+        result->offs = 127;
+        break;
+
+      case GEGL_TEXTURIZE_CANVAS_DIRECTION_BOTTOM_LEFT:
+        result->xm = 128;
+        result->ym = 1;
+        result->offs = 0;
+        break;
+
+      case GEGL_TEXTURIZE_CANVAS_DIRECTION_BOTTOM_RIGHT:
+        result->xm = 128;
+        result->ym = -1;
+        result->offs = 127;
+        break;
+    }
+}
+
 static gboolean
 process (GeglOperation       *operation,
          void                *in_buf,
@@ -4191,68 +4240,34 @@ process (GeglOperation       *operation,
          const GeglRectangle *roi,
          gint                 level)
 {
-  GeglChantO *opt = GEGL_CHANT_PROPERTIES (operation);
-
   gfloat *src  = in_buf;
   gfloat *dest = out_buf;
-
-  gint    xm, ym, offs;
-  gfloat  mult = (gfloat) opt->depth * 0.25;
 
   gint   row;   /* Row number in rectangle */
   gint   col;   /* Column number in rectangle */
 
-  const Babl *format = gegl_operation_get_format (operation, "input");
-  gboolean    has_alpha  = babl_format_has_alpha (format);
-  gint        components = babl_format_get_n_components (format) - has_alpha;
-
-  switch (opt->direction)
-    {
-      default:
-      case GEGL_TEXTURIZE_CANVAS_DIRECTION_TOP_RIGHT:
-        xm = 1;
-        ym = 128;
-        offs = 0;
-        break;
-
-      case GEGL_TEXTURIZE_CANVAS_DIRECTION_TOP_LEFT:
-        xm = -1;
-        ym = 128;
-        offs = 127;
-        break;
-
-      case GEGL_TEXTURIZE_CANVAS_DIRECTION_BOTTOM_LEFT:
-        xm = 128;
-        ym = 1;
-        offs = 0;
-        break;
-
-      case GEGL_TEXTURIZE_CANVAS_DIRECTION_BOTTOM_RIGHT:
-        xm = 128;
-        ym = -1;
-        offs = 127;
-        break;
-    }
+  TexturizeCanvasParameters config;
+  derive_parameters (operation, &config);
 
   for (row = 0; row < roi->height; ++row)
     {
       for (col = 0; col < roi->width; ++col)
         {
           gint i;
-          for (i = 0; i < components; ++i)
+          for (i = 0; i < config.components; ++i)
             {
               /*
                * Assuming twos-complement representation, it holds that n & 127
                * is n % 128 for n >= 0 and (n % 128) + 128 for n < 0.
                */
-              gint   index = ((roi->x + col) & 127) * xm +
-                             ((roi->y + row) & 127) * ym +
-                             offs;
-              gfloat color = mult * sdata [index] + *src++;
+              gint   index = ((roi->x + col) & 127) * config.xm +
+                             ((roi->y + row) & 127) * config.ym +
+                             config.offs;
+              gfloat color = config.mult * sdata [index] + *src++;
               *dest++ = CLAMP (color, 0.0, 1.0);
             }
 
-          if (has_alpha)
+          if (config.has_alpha)
             {
               *dest++ = *src++;
             }
@@ -4274,44 +4289,13 @@ cl_process (GeglOperation       *operation,
             const GeglRectangle *roi,
             gint                level)
 {
-  GeglChantO *opt = GEGL_CHANT_PROPERTIES (operation);
-
-  cl_int   xm, ym, offs;
-  cl_float mult = (cl_float) opt->depth * 0.25;
-
-  const Babl *format = gegl_operation_get_format (operation, "input");
-  cl_int     has_alpha = babl_format_has_alpha (format);
-  cl_int     components = babl_format_get_n_components (format) - has_alpha;
   cl_int     cl_err = 0;
+  cl_int     xm, ym, offs, components, has_alpha;
+  cl_float   mult;
   cl_mem     texture;
 
-  switch (opt->direction)
-    {
-      default:
-      case GEGL_TEXTURIZE_CANVAS_DIRECTION_TOP_RIGHT:
-        xm = 1;
-        ym = 128;
-        offs = 0;
-        break;
-
-      case GEGL_TEXTURIZE_CANVAS_DIRECTION_TOP_LEFT:
-        xm = -1;
-        ym = 128;
-        offs = 127;
-        break;
-
-      case GEGL_TEXTURIZE_CANVAS_DIRECTION_BOTTOM_LEFT:
-        xm = 128;
-        ym = 1;
-        offs = 0;
-        break;
-
-      case GEGL_TEXTURIZE_CANVAS_DIRECTION_BOTTOM_RIGHT:
-        xm = 128;
-        ym = -1;
-        offs = 127;
-        break;
-    }
+  TexturizeCanvasParameters config;
+  derive_parameters (operation, &config);
 
   if (!cl_data)
     {
@@ -4330,6 +4314,12 @@ cl_process (GeglOperation       *operation,
                                 sizeof(sdata), (void*) sdata, &cl_err);
   CL_CHECK;
 
+  mult = config.mult;
+  xm = config.xm;
+  ym = config.ym;
+  offs = config.offs;
+  components = config.components;
+  has_alpha = config.has_alpha;
   gegl_cl_set_kernel_args (cl_data->kernel[0],
                            sizeof(cl_mem),    (void*) &in,
                            sizeof(cl_mem),    (void*) &out,
