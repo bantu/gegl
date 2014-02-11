@@ -44,7 +44,7 @@ gegl_chant_int  (depth, _("Depth"), 1, 50, 4,
 
 #else
 
-#define GEGL_CHANT_TYPE_POINT_FILTER
+#define GEGL_CHANT_TYPE_FILTER
 #define GEGL_CHANT_C_FILE "texturize-canvas.c"
 
 #include "gegl-chant.h"
@@ -4237,55 +4237,68 @@ derive_parameters (GeglOperation *operation, TexturizeCanvasParameters *result)
 
 static gboolean
 process (GeglOperation       *operation,
-         void                *in_buf,
-         void                *out_buf,
-         glong                samples,
-         const GeglRectangle *roi,
+         GeglBuffer          *input,
+         GeglBuffer          *output,
+         const GeglRectangle *result,
          gint                 level)
 {
-  gfloat *src  = in_buf;
-  gfloat *dest = out_buf;
+  GeglBufferIterator *gi;
 
-  gint   row;   /* Row number in rectangle */
-  gint   col;   /* Column number in rectangle */
+  const Babl *format = gegl_operation_get_format (operation, "input");
 
   if (!config_is_initialised)
     {
       derive_parameters (operation, &config);
     }
 
-  for (row = 0; row < roi->height; ++row)
-    {
-      for (col = 0; col < roi->width; ++col)
-        {
-          gint i;
-          for (i = 0; i < config.components; ++i)
-            {
-              /*
-               * Assuming twos-complement representation, it holds that n & 127
-               * is n % 128 for n >= 0 and (n % 128) + 128 for n < 0.
-               */
-              gint   index = ((roi->x + col) & 127) * config.xm +
-                             ((roi->y + row) & 127) * config.ym +
-                             config.offs;
-              gfloat color = config.mult * sdata [index] + *src++;
-              *dest++ = CLAMP (color, 0.0, 1.0);
-            }
+  gi = gegl_buffer_iterator_new (input, result, 0, format,
+                                 GEGL_BUFFER_READ, GEGL_ABYSS_NONE);
 
-          if (config.has_alpha)
+  gegl_buffer_iterator_add (gi, output, result, 0, format,
+                            GEGL_BUFFER_WRITE, GEGL_ABYSS_NONE);
+
+  while (gegl_buffer_iterator_next (gi))
+    {
+      #pragma omp parallel for
+      for (gint row = 0; row < gi->roi->height; ++row)
+        {
+          gint   offset = row * gi->roi->width * config.components;
+          gfloat   *src = (gfloat*) gi->data [0] + offset;
+          gfloat  *dest = (gfloat*) gi->data [1] + offset;
+
+          for (gint col = 0; col < gi->roi->width; ++col)
             {
-              *dest++ = *src++;
+              gint i;
+              for (i = 0; i < config.components; ++i)
+                {
+                  /*
+                  * Assuming twos-complement representation, it holds that n & 127
+                  * is n % 128 for n >= 0 and (n % 128) + 128 for n < 0.
+                  */
+                  gint   index = ((gi->roi->x + col) & 127) * config.xm +
+                                 ((gi->roi->y + row) & 127) * config.ym +
+                                 config.offs;
+                  gfloat color = config.mult * sdata [index] + *src++;
+                  *dest++ = CLAMP (color, 0.0, 1.0);
+                }
+
+              if (config.has_alpha)
+                {
+                  *dest++ = *src++;
+                }
             }
         }
     }
+
   return TRUE;
 }
-
+/*
 #include "opencl/gegl-cl.h"
 #include "opencl/texturize-canvas.cl.h"
 
 static GeglClRunData *cl_data = NULL;
 static cl_mem texture;
+
 
 static gboolean
 cl_process (GeglOperation       *operation,
@@ -4354,30 +4367,29 @@ cl_process (GeglOperation       *operation,
   cl_err = gegl_clFinish(gegl_cl_get_command_queue());
   CL_CHECK;
 
-  /*
-  cl_err = gegl_clReleaseMemObject(texture);
-  CL_CHECK_ONLY(cl_err);
-  */
+  //cl_err = gegl_clReleaseMemObject(texture);
+  //CL_CHECK_ONLY(cl_err);
 
   return FALSE;
 
 error:
   return TRUE;
 }
+*/
 
 static void
 gegl_chant_class_init (GeglChantClass *klass)
 {
-  GeglOperationClass            *operation_class;
-  GeglOperationPointFilterClass *point_filter_class;
+  GeglOperationClass       *operation_class;
+  GeglOperationFilterClass *filter_class;
 
-  operation_class    = GEGL_OPERATION_CLASS (klass);
-  point_filter_class = GEGL_OPERATION_POINT_FILTER_CLASS (klass);
+  operation_class = GEGL_OPERATION_CLASS (klass);
+  filter_class    = GEGL_OPERATION_FILTER_CLASS (klass);
 
   operation_class->prepare        = prepare;
-  operation_class->opencl_support = TRUE;
-  point_filter_class->process     = process;
-  point_filter_class->cl_process  = cl_process;
+  //operation_class->opencl_support = FALSE;
+  filter_class->process           = process;
+  //filter_class->cl_process        = cl_process;
 
   gegl_operation_class_set_keys (operation_class,
     "name"       , "gegl:texturize-canvas",
