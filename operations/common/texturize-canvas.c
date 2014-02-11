@@ -4280,6 +4280,7 @@ process (GeglOperation       *operation,
 #include "opencl/texturize-canvas.cl.h"
 
 static GeglClRunData *cl_data = NULL;
+static cl_mem texture;
 
 static gboolean
 cl_process (GeglOperation       *operation,
@@ -4292,7 +4293,6 @@ cl_process (GeglOperation       *operation,
   cl_int     cl_err = 0;
   cl_int     xm, ym, offs, components, has_alpha;
   cl_float   mult;
-  cl_mem     texture;
 
   TexturizeCanvasParameters config;
   derive_parameters (operation, &config);
@@ -4303,16 +4303,16 @@ cl_process (GeglOperation       *operation,
                                    NULL};
       cl_data = gegl_cl_compile_and_build (texturize_canvas_cl_source,
                                            kernel_name);
+
+      if (!cl_data)
+        return TRUE;
+
+      // Make sdata array available to OpenCL.
+      texture = gegl_clCreateBuffer(gegl_cl_get_context(),
+                                      CL_MEM_COPY_HOST_PTR | CL_MEM_READ_ONLY,
+                                      sizeof(sdata), (void*) sdata, &cl_err);
+      CL_CHECK;
     }
-
-  if (!cl_data)
-    return TRUE;
-
-  // Make sdata array available to OpenCL.
-  texture = gegl_clCreateBuffer(gegl_cl_get_context(),
-                                CL_MEM_COPY_HOST_PTR | CL_MEM_READ_ONLY,
-                                sizeof(sdata), (void*) sdata, &cl_err);
-  CL_CHECK;
 
   mult = config.mult;
   xm = config.xm;
@@ -4347,8 +4347,10 @@ cl_process (GeglOperation       *operation,
   cl_err = gegl_clFinish(gegl_cl_get_command_queue());
   CL_CHECK;
 
+  /*
   cl_err = gegl_clReleaseMemObject(texture);
   CL_CHECK_ONLY(cl_err);
+  */
 
   return FALSE;
 
