@@ -59,6 +59,9 @@ typedef struct {
   gboolean has_alpha;  /* Whether there is an alpha channel or not */
 } TexturizeCanvasParameters;
 
+static gboolean config_is_initialised = FALSE;
+static TexturizeCanvasParameters config;
+
 /* This array contains 16384 floats interpreted as a 128x128 texture */
 static const gfloat sdata [128 * 128] =
 {
@@ -4246,8 +4249,10 @@ process (GeglOperation       *operation,
   gint   row;   /* Row number in rectangle */
   gint   col;   /* Column number in rectangle */
 
-  TexturizeCanvasParameters config;
-  derive_parameters (operation, &config);
+  if (!config_is_initialised)
+    {
+      derive_parameters (operation, &config);
+    }
 
   for (row = 0; row < roi->height; ++row)
     {
@@ -4294,8 +4299,10 @@ cl_process (GeglOperation       *operation,
   cl_int     xm, ym, offs, components, has_alpha;
   cl_float   mult;
 
-  TexturizeCanvasParameters config;
-  derive_parameters (operation, &config);
+  if (!config_is_initialised)
+    {
+      derive_parameters (operation, &config);
+    }
 
   if (!cl_data)
     {
