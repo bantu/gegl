@@ -47,6 +47,8 @@ gegl_chant_int  (depth, _("Depth"), 1, 50, 4,
 #define GEGL_CHANT_TYPE_FILTER
 #define GEGL_CHANT_C_FILE "texturize-canvas.c"
 
+#include <glib-object.h>
+#include "gegl-buffer-private.h"
 #include "gegl-chant.h"
 
 /* Contains internal parameters derived from user input. */
@@ -58,9 +60,6 @@ typedef struct {
   gint components;     /* Number of non-alpha colors */
   gboolean has_alpha;  /* Whether there is an alpha channel or not */
 } TexturizeCanvasParameters;
-
-static gboolean config_is_initialised = FALSE;
-static TexturizeCanvasParameters config;
 
 /* This array contains 16384 floats interpreted as a 128x128 texture */
 static const gfloat sdata [128 * 128] =
@@ -4235,6 +4234,8 @@ derive_parameters (GeglOperation *operation, TexturizeCanvasParameters *result)
     }
 }
 
+static gboolean run_once = FALSE;
+
 static gboolean
 process (GeglOperation       *operation,
          GeglBuffer          *input,
@@ -4242,53 +4243,63 @@ process (GeglOperation       *operation,
          const GeglRectangle *result,
          gint                 level)
 {
-  GeglBufferIterator *gi;
+  TexturizeCanvasParameters config;
+
+  gint buffer_size;
+  gfloat *in;
+  gfloat *out;
 
   const Babl *format = gegl_operation_get_format (operation, "input");
 
-  if (!config_is_initialised)
+  if (run_once)
     {
-      derive_parameters (operation, &config);
+      return TRUE;
     }
 
-  gi = gegl_buffer_iterator_new (input, result, 0, format,
-                                 GEGL_BUFFER_READ, GEGL_ABYSS_NONE);
+  derive_parameters (operation, &config);
 
-  gegl_buffer_iterator_add (gi, output, result, 0, format,
-                            GEGL_BUFFER_WRITE, GEGL_ABYSS_NONE);
+  buffer_size = sizeof(gfloat) *
+                input->extent.height * input->extent.width *
+                (config.components + config.has_alpha);
+  in = g_malloc (buffer_size);
+  out = g_malloc (buffer_size);
 
-  while (gegl_buffer_iterator_next (gi))
+  gegl_buffer_get (input, NULL, 1.0, format, in, 0, GEGL_ABYSS_NONE);
+  gegl_buffer_get (output, NULL, 1.0, format, out, 0, GEGL_ABYSS_NONE);
+
+  #pragma omp parallel for
+  for (gint row = 0; row < input->extent.height; ++row)
     {
-      #pragma omp parallel for
-      for (gint row = 0; row < gi->roi->height; ++row)
+      gint   offset = row * input->extent.width * config.components;
+      gfloat   *src = in + offset;
+      gfloat  *dest = out + offset;
+
+      for (gint col = 0; col < input->extent.width; ++col)
         {
-          gint   offset = row * gi->roi->width * config.components;
-          gfloat   *src = (gfloat*) gi->data [0] + offset;
-          gfloat  *dest = (gfloat*) gi->data [1] + offset;
-
-          for (gint col = 0; col < gi->roi->width; ++col)
+          for (gint i = 0; i < config.components; ++i)
             {
-              gint i;
-              for (i = 0; i < config.components; ++i)
-                {
-                  /*
-                  * Assuming twos-complement representation, it holds that n & 127
-                  * is n % 128 for n >= 0 and (n % 128) + 128 for n < 0.
-                  */
-                  gint   index = ((gi->roi->x + col) & 127) * config.xm +
-                                 ((gi->roi->y + row) & 127) * config.ym +
-                                 config.offs;
-                  gfloat color = config.mult * sdata [index] + *src++;
-                  *dest++ = CLAMP (color, 0.0, 1.0);
-                }
+              /*
+              * Assuming twos-complement representation, it holds that n & 127
+              * is n % 128 for n >= 0 and (n % 128) + 128 for n < 0.
+              */
+              gint   index = (col & 127) * config.xm +
+                             (row & 127) * config.ym +
+                             config.offs;
+              gfloat color = config.mult * sdata [index] + *src++;
+              *dest++ = CLAMP (color, 0.0, 1.0);
+            }
 
-              if (config.has_alpha)
-                {
-                  *dest++ = *src++;
-                }
+          if (config.has_alpha)
+            {
+              *dest++ = *src++;
             }
         }
     }
+
+  g_free (in);
+  g_free (out);
+
+  run_once = TRUE;
 
   return TRUE;
 }
