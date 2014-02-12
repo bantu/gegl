@@ -44,12 +44,27 @@ gegl_chant_int  (depth, _("Depth"), 1, 50, 4,
 
 #else
 
+/*
+ * Environment variables:
+ *
+ * CANVAS_USE_OPENMP 0, CANVAS_MIX_GPU_AND_CPU 0, GEGL_USE_OPENCL=no  (Single Threaded CPU)
+ * CANVAS_USE_OPENMP 0, CANVAS_MIX_GPU_AND_CPU 0, GEGL_USE_OPENCL=yes (OpenCL only, if available)
+ * CANVAS_USE_OPENMP 1, CANVAS_MIX_GPU_AND_CPU 0, GEGL_USE_OPENCL=no  (OpenMP only)
+ * CANVAS_USE_OPENMP 1, CANVAS_MIX_GPU_AND_CPU 1, GEGL_USE_OPENCL=yes (OpenMP and OpenCL)
+ *
+ * CANVAS_GPU_RATIO
+ * CANVAS_CPU_RATIO
+ */
+
 #define GEGL_CHANT_TYPE_FILTER
 #define GEGL_CHANT_C_FILE "texturize-canvas.c"
 
 #include <glib-object.h>
-#include "gegl-buffer-private.h"
 #include "gegl-chant.h"
+#include "gegl-buffer-private.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
 
 /* Contains internal parameters derived from user input. */
 typedef struct {
@@ -4234,99 +4249,90 @@ derive_parameters (GeglOperation *operation, TexturizeCanvasParameters *result)
     }
 }
 
-static gboolean run_once = FALSE;
-
-static gboolean
-process (GeglOperation       *operation,
-         GeglBuffer          *input,
-         GeglBuffer          *output,
-         const GeglRectangle *result,
-         gint                 level)
+static inline gboolean
+cpu_process (GeglOperation *operation,
+             TexturizeCanvasParameters *config,
+             GeglBuffer *input,
+             GeglBuffer *output,
+             const GeglRectangle *roi)
 {
-  TexturizeCanvasParameters config;
-
-  gint buffer_size;
   gfloat *in;
   gfloat *out;
-
   const Babl *format = gegl_operation_get_format (operation, "input");
+  int buffer_size = roi->width * roi->height *
+                    (config->components + config->has_alpha);
 
-  if (run_once)
+  in = g_new0(gfloat, buffer_size);
+  out = g_new0(gfloat, buffer_size);
+
+  gegl_buffer_get (input, roi, 1.0, format,
+                   in, GEGL_AUTO_ROWSTRIDE, GEGL_ABYSS_NONE);
+  gegl_buffer_get (output, roi, 1.0, format,
+                   out, GEGL_AUTO_ROWSTRIDE, GEGL_ABYSS_NONE);
+
+  if (getenv("CANVAS_USE_OPENMP"))
     {
-      return TRUE;
+      fprintf(stderr, "Using OpenMP.\n");
+    }
+  else
+    {
+      fprintf(stderr, "Not using OpenMP.\n");
     }
 
-  derive_parameters (operation, &config);
-
-  buffer_size = sizeof(gfloat) *
-                input->extent.height * input->extent.width *
-                (config.components + config.has_alpha);
-  in = g_malloc (buffer_size);
-  out = g_malloc (buffer_size);
-
-  gegl_buffer_get (input, NULL, 1.0, format, in, 0, GEGL_ABYSS_NONE);
-  gegl_buffer_get (output, NULL, 1.0, format, out, 0, GEGL_ABYSS_NONE);
-
-  #pragma omp parallel for
-  for (gint row = 0; row < input->extent.height; ++row)
+  #pragma omp parallel for if(getenv("CANVAS_USE_OPENMP"))
+  for (gint row = 0; row < roi->height; ++row)
     {
-      gint   offset = row * input->extent.width * config.components;
+      gint   offset = row * roi->width * (config->components + config->has_alpha);
       gfloat   *src = in + offset;
       gfloat  *dest = out + offset;
 
-      for (gint col = 0; col < input->extent.width; ++col)
+      for (gint col = 0; col < roi->width; ++col)
         {
-          for (gint i = 0; i < config.components; ++i)
+          for (gint i = 0; i < config->components; ++i)
             {
               /*
               * Assuming twos-complement representation, it holds that n & 127
               * is n % 128 for n >= 0 and (n % 128) + 128 for n < 0.
               */
-              gint   index = (col & 127) * config.xm +
-                             (row & 127) * config.ym +
-                             config.offs;
-              gfloat color = config.mult * sdata [index] + *src++;
+              gint   index = ((roi->x + col) & 127) * config->xm +
+                             ((roi->y + row) & 127) * config->ym +
+                             config->offs;
+              gfloat color = config->mult * sdata [index] + *src++;
               *dest++ = CLAMP (color, 0.0, 1.0);
             }
 
-          if (config.has_alpha)
+          if (config->has_alpha)
             {
               *dest++ = *src++;
             }
         }
     }
 
+  gegl_buffer_set(output, roi, 0, format, out, GEGL_AUTO_ROWSTRIDE);
+
   g_free (in);
   g_free (out);
 
-  run_once = TRUE;
-
   return TRUE;
 }
-/*
+
 #include "opencl/gegl-cl.h"
 #include "opencl/texturize-canvas.cl.h"
 
 static GeglClRunData *cl_data = NULL;
 static cl_mem texture;
 
-
 static gboolean
-cl_process (GeglOperation       *operation,
-            cl_mem              in,
-            cl_mem              out,
-            size_t              global_worksize,
-            const GeglRectangle *roi,
-            gint                level)
+cl_process (GeglOperation             *operation,
+            TexturizeCanvasParameters *config,
+            cl_mem                    in,
+            cl_mem                    out,
+            const GeglRectangle       *roi)
 {
   cl_int     cl_err = 0;
-  cl_int     xm, ym, offs, components, has_alpha;
+  cl_int     xm, ym, offs, components, has_alpha, roi_x, roi_y, roi_width;
   cl_float   mult;
-
-  if (!config_is_initialised)
-    {
-      derive_parameters (operation, &config);
-    }
+  size_t     global_worksize;
 
   if (!cl_data)
     {
@@ -4345,12 +4351,15 @@ cl_process (GeglOperation       *operation,
       CL_CHECK;
     }
 
-  mult = config.mult;
-  xm = config.xm;
-  ym = config.ym;
-  offs = config.offs;
-  components = config.components;
-  has_alpha = config.has_alpha;
+  mult = config->mult;
+  xm = config->xm;
+  ym = config->ym;
+  offs = config->offs;
+  components = config->components;
+  has_alpha = config->has_alpha;
+  roi_x = roi->x;
+  roi_y = roi->y;
+  roi_width = roi->width;
   gegl_cl_set_kernel_args (cl_data->kernel[0],
                            sizeof(cl_mem),    (void*) &in,
                            sizeof(cl_mem),    (void*) &out,
@@ -4361,13 +4370,14 @@ cl_process (GeglOperation       *operation,
                            sizeof(cl_int),    (void*) &offs,
                            sizeof(cl_int),    (void*) &components,
                            sizeof(cl_int),    (void*) &has_alpha,
-                           sizeof(cl_int),    (void*) &(roi->x),
-                           sizeof(cl_int),    (void*) &(roi->y),
-                           sizeof(cl_int),    (void*) &(roi->width),
+                           sizeof(cl_int),    (void*) &roi_x,
+                           sizeof(cl_int),    (void*) &roi_y,
+                           sizeof(cl_int),    (void*) &roi_width,
                            NULL);
   CL_CHECK;
 
-  global_worksize *= (config.components + config.has_alpha);
+  global_worksize = roi->width * roi->height *
+                    (config->components + config->has_alpha);
 
   cl_err = gegl_clEnqueueNDRangeKernel (gegl_cl_get_command_queue (),
                                         cl_data->kernel[0], 1,
@@ -4386,7 +4396,128 @@ cl_process (GeglOperation       *operation,
 error:
   return TRUE;
 }
-*/
+
+static inline gboolean
+gpu_process (GeglOperation *operation,
+             TexturizeCanvasParameters *config,
+             GeglBuffer *input,
+             GeglBuffer *output,
+             const GeglRectangle *roi)
+{
+  const Babl *format = gegl_operation_get_format (operation, "input");
+  gint error = 0;
+
+  GeglBufferClIterator *cl_iterator = gegl_buffer_cl_iterator_new (
+      output,
+      roi,
+      format,
+      GEGL_CL_BUFFER_WRITE
+  );
+
+  gint read = gegl_buffer_cl_iterator_add (
+      cl_iterator,
+      input,
+      roi,
+      format,
+      GEGL_CL_BUFFER_READ,
+      GEGL_ABYSS_NONE
+  );
+
+  while (gegl_buffer_cl_iterator_next(cl_iterator, &error) && !error)
+    {
+      error = cl_process (
+          operation,
+          config,
+          cl_iterator->tex[read],
+          cl_iterator->tex[0],
+          &cl_iterator->roi[0]
+      );
+
+      if (error)
+        {
+          gegl_buffer_cl_iterator_stop(cl_iterator);
+        }
+    }
+
+  return !error;
+}
+
+static gboolean run_once = FALSE;
+
+static gboolean
+process (GeglOperation       *operation,
+         GeglBuffer          *input,
+         GeglBuffer          *output,
+         const GeglRectangle *result,
+         gint                 level)
+{
+  TexturizeCanvasParameters config;
+
+  if (run_once)
+    {
+      return TRUE;
+    }
+
+  derive_parameters (operation, &config);
+
+  if (getenv("CANVAS_MIX_GPU_AND_CPU") && gegl_operation_use_opencl(operation))
+    {
+      int gpu_ratio = atoi(getenv("CANVAS_GPU_RATIO"));
+      int cpu_ratio = atoi(getenv("CANVAS_CPU_RATIO"));
+      fprintf(stderr, "GPU : CPU ratio = %d : %d\n", gpu_ratio, cpu_ratio);
+      int new_width = ceil((float) (input->extent.width) / (gpu_ratio + cpu_ratio));
+
+      #pragma omp parallel sections
+      {
+        #pragma omp section
+        {
+          fprintf(stderr, "Spawning CPU thread(s)\n");
+          GeglRectangle cpuRect = {
+            input->extent.x + new_width * gpu_ratio,
+            input->extent.y,
+            input->extent.width - new_width * gpu_ratio,
+            input->extent.height
+          };
+          cpu_process(operation, &config, input, output, &cpuRect);
+        }
+
+        #pragma omp section
+        {
+          fprintf(stderr, "Spawning GPU thread\n");
+          GeglRectangle gpuRect = {
+            input->extent.x,
+            input->extent.y,
+            new_width * gpu_ratio,
+            input->extent.height
+          };
+          gpu_process(operation, &config, input, output, &gpuRect);
+        }
+      }
+    }
+  else
+    {
+      GeglRectangle roi = {
+        input->extent.x,
+        input->extent.y,
+        input->extent.width,
+        input->extent.height
+      };
+
+      if (gegl_operation_use_opencl(operation))
+        {
+          fprintf(stderr, "Using OpenCL (hopefully GPU)\n");
+          gpu_process(operation, &config, input, output, &roi);
+        }
+      else
+        {
+          fprintf(stderr, "Using CPU only\n");
+          cpu_process(operation, &config, input, output, &roi);
+        }
+    }
+
+  run_once = TRUE;
+  return TRUE;
+}
 
 static void
 gegl_chant_class_init (GeglChantClass *klass)
@@ -4398,9 +4529,8 @@ gegl_chant_class_init (GeglChantClass *klass)
   filter_class    = GEGL_OPERATION_FILTER_CLASS (klass);
 
   operation_class->prepare        = prepare;
-  //operation_class->opencl_support = FALSE;
+  operation_class->opencl_support = TRUE;
   filter_class->process           = process;
-  //filter_class->cl_process        = cl_process;
 
   gegl_operation_class_set_keys (operation_class,
     "name"       , "gegl:texturize-canvas",
